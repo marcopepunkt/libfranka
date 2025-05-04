@@ -1,3 +1,6 @@
 [submodule "common"]
 	path = common
 	url = https://github.com/frankaemika/libfranka-common.git
+[submodule "extern/pybind11"]
+	path = extern/pybind11
+	url = https://github.com/pybind/pybind11.git
