@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
         {{20.0, 20.0, 20.0, 25.0, 25.0, 25.0}}, {{20.0, 20.0, 20.0, 25.0, 25.0, 25.0}});
 
     std::array<double, 7> initial_position;
-    double time = 0.0;
+    double time = 0.0; // Time in seconds
     robot.control([&initial_position, &time](const franka::RobotState& robot_state,
                                              franka::Duration period) -> franka::JointPositions {
       time += period.toSec();

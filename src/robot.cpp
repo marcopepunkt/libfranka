@@ -50,6 +50,7 @@ Robot::ServerVersion Robot::serverVersion() const noexcept {
   return impl_->serverVersion();
 }
 
+
 void Robot::control(std::function<Torques(const RobotState&, franka::Duration)> control_callback,
                     bool limit_rate,
                     double cutoff_frequency) {
@@ -120,6 +121,7 @@ void Robot::control(std::function<Torques(const RobotState&, franka::Duration)> 
                                         cutoff_frequency);
   loop();
 }
+
 
 void Robot::control(
     std::function<JointPositions(const RobotState&, franka::Duration)> motion_generator_callback,

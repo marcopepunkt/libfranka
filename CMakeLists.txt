@@ -180,6 +180,13 @@ if(BUILD_DOCUMENTATION)
   add_subdirectory(doc)
 endif()
 
+option(BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
+if(BUILD_PYTHON_BINDINGS)
+  add_subdirectory(python)
+  add_subdirectory(extern/pybind11)
+endif()
+
+
 ## Packaging
 set(CPACK_PACKAGE_VENDOR "Franka Emika GmbH")
 set(CPACK_GENERATOR "DEB;TGZ")

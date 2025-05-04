@@ -175,6 +175,10 @@ class Robot {
                bool limit_rate = false,
                double cutoff_frequency = kDefaultCutoffFrequency);
 
+
+  void moveToJointPosition(const std::array<double, 7>& target, double duration = 2.0);
+
+
   /**
    * Starts a control loop for sending joint-level torque commands and joint positions.
    *

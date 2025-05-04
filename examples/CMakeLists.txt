@@ -47,6 +47,7 @@ set(EXAMPLES
   motion_with_control_external_control_loop
   print_joint_poses
   vacuum_object
+  my_example
 )
 
 foreach(example ${EXAMPLES})
