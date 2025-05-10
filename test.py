@@ -1,8 +1,9 @@
 import sys
 sys.path.append("build/python")
 import numpy as np
+import time
 
-from  franka_py import Robot, RobotState, set_default_behavior, move_to_joint_position
+from  franka_py import Robot, RobotState, set_default_behavior, move_to_joint_position, PDController
 
 def state_reader_example(robot):
         
@@ -30,9 +31,32 @@ def state_reader_example(robot):
 def robot_mover_example(robot):
     q = robot.read_once().q  # Read the robot state once
     q = np.array(q)  # Convert to numpy array
-    q -= np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5] ) # Modify the joint positions
+    q += np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5] ) # Modify the joint positions
     move_to_joint_position(robot, q.tolist() ,0.5)  # Move to the modified joint positions
+
+def pd_controller_example(robot):
+    q = robot.read_once().q  # Read the robot state once
+    print("Red the state")
+    q = np.array(q)
+    pd_controller = PDController(robot,q)
+    print("PD controller initialized")
+    pd_controller.start()
+    print("PD controller started")
+    # wait for 5 sec
+    next_pose = q + 5* np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01]) # Modify the joint positions
+    pd_controller.update_target(next_pose)  # Set the target joint positions
+    print("PD controller set target")
+    time.sleep(1)  # Wait for 5 seconds
+    pd_controller.update_target(q)  # Set the target joint positions back to the original
+    print("PD controller set target back to original")
+    time.sleep(1)  # Wait for 5 seconds
+    print("Stopping the PD controller")
+    pd_controller.stop()
+    print("PD controller stopped")
     
+    
+    
+
 if __name__ == "__main__":
     print("trying to connect to robot   ")
     robot = Robot("192.168.1.200")  # or whatever IP 
@@ -40,4 +64,6 @@ if __name__ == "__main__":
     set_default_behavior(robot)
     print("Have set default behavior")
     
-    robot_mover_example(robot)
+    pd_controller_example(robot)
+    
+    

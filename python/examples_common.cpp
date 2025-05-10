@@ -5,9 +5,15 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <thread>
+#include <iostream>
 
 #include <franka/exception.h>
 #include <franka/robot.h>
+#include <franka/model.h>  
+#include <pybind11/gil.h>
+#include <mutex>
+
 
 void setDefaultBehavior(franka::Robot& robot) {
   robot.setCollisionBehavior(
@@ -15,15 +21,179 @@ void setDefaultBehavior(franka::Robot& robot) {
       {{10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0}}, {{10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0}},
       {{20.0, 20.0, 20.0, 20.0, 20.0, 20.0}}, {{20.0, 20.0, 20.0, 20.0, 20.0, 20.0}},
       {{10.0, 10.0, 10.0, 10.0, 10.0, 10.0}}, {{10.0, 10.0, 10.0, 10.0, 10.0, 10.0}});
-  robot.setJointImpedance({{3000, 3000, 3000, 2500, 2500, 2000, 2000}});
-  robot.setCartesianImpedance({{3000, 3000, 3000, 300, 300, 300}});
+  //robot.setJointImpedance({{3000, 3000, 3000, 2500, 2500, 2000, 2000}});
+  //robot.setCartesianImpedance({{3000, 3000, 3000, 300, 300, 300}});
 }
 
 void moveToJointPosition(franka::Robot& robot, const std::array<double, 7>& target,
-                     double duration) {
-  MotionGenerator motion_generator(duration, target);
-  robot.control(motion_generator);
+                     double speed_factor) {
+  MotionGenerator motion_generator(speed_factor, target);
+  
+  robot.control(motion_generator, franka::ControllerMode::kJointImpedance);
+  
 }
+
+PDController::PDController(franka::Robot& robot, const Eigen::Matrix<double, 9, 1>& start_angles)
+  : robot_(robot),
+    q_target_(start_angles.head<7>()),
+    gripper_state_(start_angles.tail<2>()),
+    running_(false),
+    franka_robot_model_(robot.loadModel()) {
+      kp_ << 200, 200, 200, 40, 30, 20, 6;
+      kd_ = 2.0 * kp_.cwiseSqrt();  // Critical damping
+      controller_ = Eigen::Matrix<double, 7, 1>::Zero();
+    }
+
+
+void PDController::start() {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (running_) {
+      std::cout << "Control loop is already running!" << std::endl;
+      return;  // Prevent multiple invocations
+    }   
+    // Mark as running
+    running_ = true;
+  }
+
+  pybind11::gil_scoped_release release;
+
+
+
+
+  // Start the control loop in a background thread
+  std::thread control_thread([this]() {
+      franka::RobotState initial_state = robot_.readOnce();
+      q_current_ = Eigen::Map<const Eigen::Matrix<double, 7, 1>>(initial_state.q.data());
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        filtered_targets_ = q_current_;
+      }
+
+      robot_.control(
+          [this](const franka::RobotState& robot_state, franka::Duration period) -> franka::Torques {
+              Eigen::Matrix<double, 7, 1> tau_d = this->controlCallback(robot_state, period);
+              
+              std::cout << "Torques: [";
+              for (int i = 0; i < 7; ++i) {
+                  std::cout << tau_d(i);
+                  if (i < 6) std::cout << ", ";
+              }
+              std::cout << "]" << std::endl;
+
+
+              std::array<double, 7> tau_d_array;
+              for (int i = 0; i < 7; ++i) {
+                  tau_d_array[i] = tau_d(i);
+              }
+
+              {
+                std::lock_guard<std::mutex> lock(mutex_);
+                if (!running_) {
+                  return franka::MotionFinished(franka::Torques(tau_d_array));
+              }
+
+              }
+              return franka::Torques(tau_d_array);
+          },
+          false,  // limit_rate
+          franka::kMaxCutoffFrequency  // disable low-pass filter
+      );
+  });
+
+    control_thread.detach();  // Detach the thread to run in the background
+}
+    
+
+void PDController::stop() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  running_ = false;
+}
+
+void PDController::updateTarget(const Eigen::Matrix<double, 9, 1>& angles) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  q_target_ = angles.head<7>();
+  gripper_state_ = angles.tail<2>();
+}  
+
+ Eigen::Matrix<double, 7, 1>  PDController::controlCallback(const franka::RobotState& robot_state, franka::Duration period) {
+  (void) period;  // Unused variable, can be removed if not needed
+  // Get robot state data from franka_robot_model
+    std::array<double, 49> mass = franka_robot_model_.mass(robot_state);
+    std::array<double, 7> coriolis_array = franka_robot_model_.coriolis(robot_state);
+    std::array<double, 42> jacobian_array = franka_robot_model_.zeroJacobian(franka::Frame::kEndEffector, robot_state);
+    
+    // Map the arrays to Eigen matrices
+    Eigen::Map<Eigen::Matrix<double, 7, 1>> coriolis(coriolis_array.data());
+    Eigen::Map<Eigen::Matrix<double, 6, 7>> jacobian(jacobian_array.data());
+    Eigen::Map<Eigen::Matrix<double, 7, 7>> M(mass.data());
+
+    q_current_ = Eigen::Map<const Eigen::Matrix<double, 7, 1>>(robot_state.q.data());
+    dq_ = Eigen::Map<const Eigen::Matrix<double, 7, 1>>(robot_state.dq.data());
+    
+    // Update joint states using the state interfaces
+    // updateJointStates();
+
+    // Initialize torque vector
+    Eigen::VectorXd tau_d(7);  
+    
+    
+    // Calculate the filtered target positions
+    for (size_t i = 0; i < 7; ++i) {
+      // Calculate the delta between policy output and filtered target, policy_joint_positions_ is the target from the policy and filtered_targets_ is the previous target
+      double delta;
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        delta = q_target_(i) - filtered_targets_(i);
+      }
+
+      // Clamp the delta to the maximum allowable range
+      delta = std::clamp(delta, -max_delta_, max_delta_);
+
+      // Update the filtered target with the clamped delta -> q_desired_t = q_desired_t-1 + alpha*delta
+      filtered_targets_(i) = filtered_targets_(i) + filter_factor_ * delta;
+    }
+
+    // Set the desired joint position (always use the latest filtered_targets_)
+    q_desired = filtered_targets_;
+
+    // Compute joint position error, q_ is the current joint position obtained from the robot state
+    Eigen::Matrix<double, 7, 1> position_error = q_desired - q_current_;
+
+    // Calculate joint torques using PD control law with gravity compensation
+    // tau = kp * (q* - q) - kd * q_dot + coriolis + controller
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      tau_d = kp_.cwiseProduct(position_error) - kd_.cwiseProduct(dq_) + coriolis + controller_;
+    }
+
+    // Apply torque rate limiting for smooth control regardless of control mode,
+    tau_d = saturateTorqueRate(tau_d, tau_J_d_M);
+    tau_J_d_M = tau_d;
+
+    // Send joint torque commands to the robot via the command interfaces
+    return tau_d;
+  }
+
+  Eigen::Matrix<double, 7, 1> PDController::saturateTorqueRate(
+    const Eigen::Matrix<double, 7, 1>& tau_d_calculated,
+    const Eigen::Matrix<double, 7, 1>& tau_J_d_M) {  
+    Eigen::Matrix<double, 7, 1> tau_d_saturated{};
+    
+    for (size_t i = 0; i < 7; i++) {
+      double difference = tau_d_calculated[i] - tau_J_d_M[i];
+      tau_d_saturated[i] = tau_J_d_M[i] + std::max(std::min(difference, delta_tau_max_), -delta_tau_max_);
+    }
+    
+    return tau_d_saturated;
+  }
+
+
+
+
+
+
+
 
 
 
@@ -121,21 +291,21 @@ void MotionGenerator::calculateSynchronizedValues() {
 }
 
 franka::JointPositions MotionGenerator::operator()(const franka::RobotState& robot_state,
-                                                   franka::Duration period) {
-  time_ += period.toSec();
+  franka::Duration period) {
+time_ += period.toSec();
 
-  if (time_ == 0.0) {
-    q_start_ = Vector7d(robot_state.q_d.data());
-    delta_q_ = q_goal_ - q_start_;
-    calculateSynchronizedValues();
-  }
+if (time_ == 0.0) {
+q_start_ = Vector7d(robot_state.q.data());
+delta_q_ = q_goal_ - q_start_;
+calculateSynchronizedValues();
+}
 
-  Vector7d delta_q_d;
-  bool motion_finished = calculateDesiredValues(time_, &delta_q_d);
+Vector7d delta_q_d;
+bool motion_finished = calculateDesiredValues(time_, &delta_q_d);
 
-  std::array<double, 7> joint_positions;
-  Eigen::VectorXd::Map(&joint_positions[0], 7) = (q_start_ + delta_q_d);
-  franka::JointPositions output(joint_positions);
-  output.motion_finished = motion_finished;
-  return output;
+std::array<double, 7> joint_positions;
+Eigen::VectorXd::Map(&joint_positions[0], 7) = (q_start_ + delta_q_d);
+franka::JointPositions output(joint_positions);
+output.motion_finished = motion_finished;
+return output;
 }

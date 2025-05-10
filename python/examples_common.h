@@ -10,6 +10,7 @@
 #include <franka/duration.h>
 #include <franka/robot.h>
 #include <franka/robot_state.h>
+#include <franka/model.h>
 
 /**
  * @file examples_common.h
@@ -24,7 +25,36 @@
 void setDefaultBehavior(franka::Robot& robot);
 
 void moveToJointPosition(franka::Robot& robot, const std::array<double, 7>& target,
-                      double duration = 2.0);
+                      double speed_factor);
+
+class PDController {
+ public:
+  PDController(franka::Robot& robot, const Eigen::Matrix<double, 9, 1>& start_angles);
+  void start();
+  void stop();
+  void updateTarget(const Eigen::Matrix<double, 9, 1>& angles);
+ private:
+  franka::Robot& robot_;
+  Eigen::Matrix<double, 7, 1> q_target_;
+  Eigen::Matrix<double, 2, 1> gripper_state_;
+  Eigen::Matrix<double, 7, 1> controller_;
+  Eigen::Matrix<double, 7, 1> q_current_, kp_, kd_, filtered_targets_, q_desired, dq_;
+  bool running_;
+  std::mutex mutex_; // Mutex to protect shared variables
+  franka::Model franka_robot_model_;
+  double filter_factor_ = 0.005; // Original was 0.1
+  double max_delta_ = 0.1; // Original was 0.1 [rad] ~1.72 degrees
+  Eigen::Matrix<double, 7, 1> tau_J_d_M = Eigen::MatrixXd::Zero(7, 1);
+  const double delta_tau_max_{1};
+
+  Eigen::Matrix<double, 7, 1> controlCallback(const franka::RobotState& robot_state,
+                                             franka::Duration period);
+
+  Eigen::Matrix<double, 7, 1> saturateTorqueRate(
+    const Eigen::Matrix<double, 7, 1>& tau_d_calculated,
+    const Eigen::Matrix<double, 7, 1>& tau_J_d_M);
+};
+
 
 /**
  * An example showing how to generate a joint pose motion to a goal position. Adapted from:

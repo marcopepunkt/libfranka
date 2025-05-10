@@ -123,6 +123,7 @@ void Robot::control(std::function<Torques(const RobotState&, franka::Duration)> 
 }
 
 
+
 void Robot::control(
     std::function<JointPositions(const RobotState&, franka::Duration)> motion_generator_callback,
     ControllerMode controller_mode,
