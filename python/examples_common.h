@@ -11,6 +11,7 @@
 #include <franka/robot.h>
 #include <franka/robot_state.h>
 #include <franka/model.h>
+#include <franka/gripper.h>
 
 /**
  * @file examples_common.h
@@ -29,12 +30,15 @@ void moveToJointPosition(franka::Robot& robot, const std::array<double, 7>& targ
 
 class PDController {
  public:
-  PDController(franka::Robot& robot, const Eigen::Matrix<double, 9, 1>& start_angles);
+  PDController(franka::Robot& robot, franka::Gripper& gripper, const Eigen::Matrix<double, 7, 1>& start_angles);
   void start();
   void stop();
-  void updateTarget(const Eigen::Matrix<double, 9, 1>& angles);
+  void updateTarget(const Eigen::Matrix<double, 7, 1>& angles);
+  void openGripper();
+  void closeGripper();
  private:
   franka::Robot& robot_;
+  franka::Gripper& gripper_;
   Eigen::Matrix<double, 7, 1> q_target_;
   Eigen::Matrix<double, 2, 1> gripper_state_;
   Eigen::Matrix<double, 7, 1> controller_;

@@ -34,10 +34,12 @@ PYBIND11_MODULE(franka_py, m){
     m.def("move_to_joint_position", &moveToJointPosition, "Move to joint position");
 
     py::class_<PDController>(m, "PDController")
-      .def(py::init<franka::Robot&, const Eigen::Matrix<double, 7, 1>&>(), "Initialize PD controller")
+      .def(py::init<franka::Robot&, franka::Gripper&, const Eigen::Matrix<double, 7, 1>&>(), "Initialize PD controller")
       .def("start", &PDController::start, "Start the PD controller")
       .def("stop", &PDController::stop, "Stop the PD controller")
-      .def("update_target", &PDController::updateTarget, "Update target joint position");
+      .def("update_target", &PDController::updateTarget, "Update target joint position")
+      .def("close_gripper", &PDController::closeGripper, "Close the gripper")
+      .def("open_gripper", &PDController::openGripper, "Open the gripper");
       
     // Gripper bindings
     py::class_<franka::GripperState>(m, "GripperState", "State of the gripper")

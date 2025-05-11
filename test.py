@@ -3,7 +3,7 @@ sys.path.append("build/python")
 import numpy as np
 import time
 
-from  franka_py import Robot, RobotState, set_default_behavior, move_to_joint_position, PDController
+from franka_py import Robot, RobotState, Gripper, set_default_behavior, move_to_joint_position, PDController
 
 def state_reader_example(robot):
         
@@ -34,36 +34,119 @@ def robot_mover_example(robot):
     q += np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5] ) # Modify the joint positions
     move_to_joint_position(robot, q.tolist() ,0.5)  # Move to the modified joint positions
 
-def pd_controller_example(robot):
-    q = robot.read_once().q  # Read the robot state once
-    print("Red the state")
-    q = np.array(q)
-    pd_controller = PDController(robot,q)
+def pd_controller_with_gripper_example(robot, gripper):
+    # Use the specified starting position
+    q = np.array([0, -np.pi/4, 0, -3 * np.pi/4, 0, np.pi/2, np.pi/4])
+    print("Using specified starting position")
+    
+    # Read the gripper state
+    gripper_state = gripper.read_once()
+    print(f"Current gripper width: {gripper_state.width:.4f} m")
+    print(f"Max gripper width: {gripper_state.max_width:.4f} m")
+    
+    # Create a 7x1 array with robot joint positions (we now use 7x1 instead of 9x1)
+    full_state = np.zeros(7)
+    full_state[:7] = q
+    
+    # Initialize PD controller with robot, gripper, and full state
+    pd_controller = PDController(robot, gripper, full_state)
     print("PD controller initialized")
+    
+    # Start the controller
     pd_controller.start()
     print("PD controller started")
-    # wait for 5 sec
-    next_pose = q + 5* np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01]) # Modify the joint positions
-    pd_controller.update_target(next_pose)  # Set the target joint positions
-    print("PD controller set target")
-    time.sleep(1)  # Wait for 5 seconds
-    pd_controller.update_target(q)  # Set the target joint positions back to the original
-    print("PD controller set target back to original")
-    time.sleep(1)  # Wait for 5 seconds
+    
+    # Demonstrate asynchronous gripper control
+    print("\n--- Demonstrating asynchronous gripper control ---")
+    
+    # Define amplitude for each joint (small values for safety)
+    joint_amplitudes = 2*np.array([0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05])
+    
+    # Move the robot in a sine pattern while opening and closing the gripper
+    print("\nStarting sine movement with asynchronous gripper control...")
+    print("The gripper will open and close based on the sine wave position")
+    
+    start_time = time.time()
+    duration = 10  # seconds
+    frequency = 0.5  # Hz
+    last_gripper_state = "none"  # Track last gripper command
+    
+    while time.time() - start_time < duration:
+        # Calculate the current phase based on elapsed time
+        elapsed = time.time() - start_time
+        phase = 2 * np.pi * frequency * elapsed
+        
+        # Create sine wave for each joint
+        sine_value = np.sin(phase)
+        
+        # Update robot joints with sine pattern
+        next_pose = q + joint_amplitudes * sine_value
+        
+        # Update the target
+        pd_controller.update_target(next_pose)
+        
+        # Open and close gripper based on sine wave position
+        # When sine is positive, open the gripper
+        # When sine is negative, close the gripper
+        if sine_value > 0.3 and last_gripper_state != "open":
+            pd_controller.open_gripper()
+            last_gripper_state = "open"
+            print(f"Time: {elapsed:.1f}s, Robot moving with sine value: {sine_value:.3f} - Opening gripper")
+        elif sine_value < -0.3 and last_gripper_state != "close":
+            pd_controller.close_gripper()
+            last_gripper_state = "close"
+            print(f"Time: {elapsed:.1f}s, Robot moving with sine value: {sine_value:.3f} - Closing gripper")
+        # Print status periodically
+        elif int(elapsed * 10) != int((elapsed - 0.1) * 10):  # Print every 0.1 seconds
+            print(f"Time: {elapsed:.1f}s, Robot moving with sine value: {sine_value:.3f}")
+       
+        # Small sleep to avoid overwhelming the controller
+        time.sleep(1/30)
+    
+   
+    
+    # Move back to original position
+    print("\nMoving back to original position...")
+    pd_controller.update_target(q)
+    time.sleep(1)  # Give time to move back
+    
     print("Stopping the PD controller")
     pd_controller.stop()
     print("PD controller stopped")
+    print("\n--- Asynchronous gripper control demonstration completed ---")
     
     
     
 
 if __name__ == "__main__":
-    print("trying to connect to robot   ")
-    robot = Robot("192.168.1.200")  # or whatever IP 
-    print("connected to robot")   
-    set_default_behavior(robot)
-    print("Have set default behavior")
-    
-    pd_controller_example(robot)
-    
-    
+    try:
+        # Connect to robot
+        print("Connecting to robot...")
+        robot = Robot("192.168.1.200")  # Use your robot's IP
+        print("Connected to robot")
+        
+        # Set default behavior
+        set_default_behavior(robot)
+        print("Set default behavior")
+        
+        # Move to the specified starting position
+        starting_position = [0, -np.pi/4, 0, -3 * np.pi/4, 0, np.pi/2, np.pi/4]
+        print("Moving to starting position...")
+        move_to_joint_position(robot, starting_position, 0.5)
+        print("Reached starting position")
+        
+        # Connect to gripper
+        print("Connecting to gripper...")
+        gripper = Gripper("192.168.1.200")  # Use the same IP as your robot
+        print("Connected to gripper")
+        
+        # Perform homing of the gripper
+        print("Performing gripper homing...")
+        success = gripper.homing()
+        print(f"Gripper homing {'successful' if success else 'failed'}")
+        
+        # Test the PD controller with gripper
+        pd_controller_with_gripper_example(robot, gripper)
+        
+    except Exception as e:
+        print(f"Error: {e}")

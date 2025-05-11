@@ -33,16 +33,18 @@ void moveToJointPosition(franka::Robot& robot, const std::array<double, 7>& targ
   
 }
 
-PDController::PDController(franka::Robot& robot, const Eigen::Matrix<double, 9, 1>& start_angles)
+PDController::PDController(franka::Robot& robot, franka::Gripper& gripper, const Eigen::Matrix<double, 7, 1>& start_angles)
   : robot_(robot),
-    q_target_(start_angles.head<7>()),
-    gripper_state_(start_angles.tail<2>()),
+    gripper_(gripper),
+    q_target_(start_angles),
+    gripper_state_(Eigen::Matrix<double, 2, 1>::Zero()), // Initialize with zeros since we don't have gripper state
     running_(false),
     franka_robot_model_(robot.loadModel()) {
       kp_ << 200, 200, 200, 40, 30, 20, 6;
       kd_ = 2.0 * kp_.cwiseSqrt();  // Critical damping
       controller_ = Eigen::Matrix<double, 7, 1>::Zero();
     }
+
 
 
 void PDController::start() {
@@ -110,10 +112,10 @@ void PDController::stop() {
   running_ = false;
 }
 
-void PDController::updateTarget(const Eigen::Matrix<double, 9, 1>& angles) {
+void PDController::updateTarget(const Eigen::Matrix<double, 7, 1>& angles) {
   std::lock_guard<std::mutex> lock(mutex_);
-  q_target_ = angles.head<7>();
-  gripper_state_ = angles.tail<2>();
+  q_target_ = angles;
+  // Note: We're not updating gripper_state_ anymore since we're only using a 7x1 matrix
 }  
 
  Eigen::Matrix<double, 7, 1>  PDController::controlCallback(const franka::RobotState& robot_state, franka::Duration period) {
@@ -189,7 +191,46 @@ void PDController::updateTarget(const Eigen::Matrix<double, 9, 1>& angles) {
   }
 
 
+void PDController::closeGripper() {
+  // Release the GIL during gripper operations to prevent blocking Python
+  pybind11::gil_scoped_release release;
 
+
+  // Run gripper close operation in a separate thread to make it asynchronous
+  std::thread gripper_thread([this]() {
+    try {
+      // Use grasp with small width to close the gripper
+      double width = 0.0;  // Minimum width
+      double speed = 0.1;   // Speed in m/s
+      double force = 60.0;  // Force in N
+      gripper_.grasp(width, speed, force);
+    } catch (const std::exception& e) {
+      std::cerr << "Error during asynchronous gripper close operation: " << e.what() << std::endl;
+    }
+  });
+  gripper_thread.detach();  // Detach thread to run independently
+}
+
+void PDController::openGripper() {
+
+  // Release the GIL during gripper operations to prevent blocking Python
+  pybind11::gil_scoped_release release;
+
+  // Run gripper open operation in a separate thread to make it asynchronous
+  std::thread gripper_thread([this]() {
+    try {
+      // Use move with maximum width to open the gripper
+      // Get the current state to determine max width
+      franka::GripperState state = gripper_.readOnce();
+      double width = state.max_width;  // Maximum opening width
+      double speed = 0.1;              // Speed in m/s
+      gripper_.move(width, speed);
+    } catch (const std::exception& e) {
+      std::cerr << "Error during asynchronous gripper open operation: " << e.what() << std::endl;
+    }
+  });
+  gripper_thread.detach();  // Detach thread to run independently
+}
 
 
 
