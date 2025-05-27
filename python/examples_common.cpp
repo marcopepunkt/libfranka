@@ -76,14 +76,6 @@ void PDController::start() {
           [this](const franka::RobotState& robot_state, franka::Duration period) -> franka::Torques {
               Eigen::Matrix<double, 7, 1> tau_d = this->controlCallback(robot_state, period);
               
-              std::cout << "Torques: [";
-              for (int i = 0; i < 7; ++i) {
-                  std::cout << tau_d(i);
-                  if (i < 6) std::cout << ", ";
-              }
-              std::cout << "]" << std::endl;
-
-
               std::array<double, 7> tau_d_array;
               for (int i = 0; i < 7; ++i) {
                   tau_d_array[i] = tau_d(i);
@@ -94,6 +86,15 @@ void PDController::start() {
                 if (!running_) {
                   return franka::MotionFinished(franka::Torques(tau_d_array));
               }
+
+              std::cout << "Torques: [";
+              for (int i = 0; i < 7; ++i) {
+                  std::cout << tau_d_array[i];
+                  if (i < 6) std::cout << ", ";
+              }
+              std::cout << "]" << std::endl;
+
+              std::cout << "current Duration: " << period.toSec() << " seconds" << std::endl;
 
               }
               return franka::Torques(tau_d_array);

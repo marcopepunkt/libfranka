@@ -43,7 +43,7 @@ def pd_controller_with_gripper_example(robot, gripper):
     gripper_state = gripper.read_once()
     print(f"Current gripper width: {gripper_state.width:.4f} m")
     print(f"Max gripper width: {gripper_state.max_width:.4f} m")
-    
+    # 
     # Create a 7x1 array with robot joint positions (we now use 7x1 instead of 9x1)
     full_state = np.zeros(7)
     full_state[:7] = q

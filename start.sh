@@ -7,10 +7,12 @@ cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/openrobots/lib/cmake -
 make 
 
 # Generate Python stubs
+echo "Generating Python stubs..."   
 cd python
 PYTHONPATH=. pybind11-stubgen franka_py
 
 # Move stubs to the correct location
+echo "Moving stubs to the correct location..."
 mv stubs/franka_py.pyi .
 rmdir stubs
 

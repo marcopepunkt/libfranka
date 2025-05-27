@@ -9,10 +9,37 @@
 #include <franka/gripper_state.h>
 #include <pybind11/eigen.h>
 #include "examples_common.h"
+#include "external_control.cpp"
+
 
 
 namespace py = pybind11;
 
+/**
+ * @file bindings.cpp
+ * @brief Python bindings for the Franka Emika Panda robot using pybind11.
+ *
+ * This module exposes C++ classes and functions from the Franka library to Python,
+ * allowing users to control the Franka Panda robot and its gripper, read their states,
+ * and implement custom controllers from Python code.
+ *
+ * The bindings include:
+ * - franka::Robot: Maintains a network connection to the robot, provides state access, and command execution.
+ * - franka::RobotState: Provides read-only access to the robot's state variables.
+ * - PDController: A proportional-derivative controller for joint position control.
+ * - Controller: A generic controller for the robot with external control loop support.
+ * - franka::Gripper and franka::GripperState: Interfaces for controlling and monitoring the gripper.
+ * - Utility functions for setting default behavior and moving to joint positions.
+ *
+ * Example usage in Python:
+ *   import franka_py
+ *   robot = franka_py.Robot("192.168.1.1")
+ *   state = robot.read_once()
+ *   print(state.q)
+ *
+ * @author [Your Name]
+ * @date [Date]
+ */
 PYBIND11_MODULE(franka_py, m){
     m.doc() = "Franka Emika Panda robot bindings for Python. This is a simple example";
     py::class_<franka::Robot>(m, "Robot", "Maintains a network connection to the robot, provides the current robot state, and allows execution of commands")
@@ -34,13 +61,22 @@ PYBIND11_MODULE(franka_py, m){
     m.def("move_to_joint_position", &moveToJointPosition, "Move to joint position");
 
     py::class_<PDController>(m, "PDController")
-      .def(py::init<franka::Robot&, franka::Gripper&, const Eigen::Matrix<double, 7, 1>&>(), "Initialize PD controller")
+      .def(py::init<franka::Robot&, franka::Gripper&, const Eigen::Matrix<double, 7, 1>&>(),py::keep_alive<1, 2>(),"Initialize PD controller")
       .def("start", &PDController::start, "Start the PD controller")
       .def("stop", &PDController::stop, "Stop the PD controller")
       .def("update_target", &PDController::updateTarget, "Update target joint position")
       .def("close_gripper", &PDController::closeGripper, "Close the gripper")
       .def("open_gripper", &PDController::openGripper, "Open the gripper");
       
+    // // Controller with external control loop    
+    py::class_<Controller>(m, "Controller", "Controller for the robot")
+      .def(py::init<franka::Robot&, const Eigen::Matrix<double, 7, 1>&, const Eigen::Matrix<double, 7, 1>&>(),
+          py::arg("robot"), py::arg("initial_target"), py::arg("kp_gains"),
+          "Initialize the controller with a robot, initial target joint position, and kp gains")
+      .def("start", &Controller::start, "Start the controller")
+      .def("stop", &Controller::stop, "Stop the controller")
+      .def("update_target", &Controller::updateTarget, "Update target joint position");
+
     // Gripper bindings
     py::class_<franka::GripperState>(m, "GripperState", "State of the gripper")
       .def(py::init<>())
